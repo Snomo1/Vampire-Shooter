@@ -3,40 +3,73 @@ import pygame.sprite
 from settings import *
 from Player import Player
 from sprites import *
-from random import randint
+from random import randint, choice
 from pytmx.util_pygame import load_pygame
 from groups import AllSprites
 
 
 class Game():
     def __init__(self):
-        # setup
         pygame.init()
         self.display_surface = pygame.display.set_mode((Window_Width, Window_Height))
         pygame.display.set_caption("Vampire Survivor")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.load_image()
 
         # groups
         self.all_sprites = AllSprites()
         self.collision_sprites = pygame.sprite.Group()
         self.bullet_sprites = pygame.sprite.Group()
-        self.setup()
+        self.enemy_sprites = pygame.sprite.Group()
 
         # gun_timer
         self.can_shoot = True
         self.shoot_time = 0
         self.gun_cooldown = 200
 
+        # enemy_timer
+        self.enemy_event = pygame.event.custom_type()
+        pygame.time.set_timer(self.enemy_event, 800)
+        self.spawn_position = []
+
+        # audio
+        self.shoot_sound = pygame.mixer.Sound(
+            join("resource", "Vampire survivor", "Vampire 0 setup", "audio", "shoot.wav"))
+        self.shoot_sound.set_volume(0.1)
+
+        self.impact_sound = pygame.mixer.Sound(
+            join("resource", "Vampire survivor", "Vampire 0 setup", "audio", "impact.ogg"))
+        self.impact_sound.set_volume(0.3)
+
+        self.music = pygame.mixer.Sound(
+            join("resource", "Vampire survivor", "Vampire 0 setup", "audio", "stranger things.mp3"))
+        self.music.set_volume(0.1)
+        self.music.play(loops=-1)
+
+        # setup
+        self.load_image()
+        self.setup()
+
     def load_image(self):
         self.bullet_surf = pygame.image.load(
             join("resource", "Vampire survivor", "Vampire 0 setup", "images", "gun", "bullet.png")).convert_alpha()
 
+        folders = list(walk(join("resource", "Vampire survivor", "Vampire 0 setup", "images", "enemies")))[0][1]
+        self.enemy_frames = {}
+        for folder in folders:
+            for folder_path, _, file_names in walk(
+                    join("resource", "Vampire survivor", "Vampire 0 setup", "images", "enemies", folder)):
+                self.enemy_frames[folder] = []
+                for file_name in sorted(file_names, key=lambda name: int(name.split(".")[0])):
+                    full_path = join(folder_path, file_name)
+                    surf = pygame.image.load(full_path).convert_alpha()
+                    self.enemy_frames[folder].append(surf)
+
     def input(self):
         if pygame.mouse.get_pressed()[0] and self.can_shoot:
+            self.shoot_sound.play()
             pos = self.gun.rect.center + self.gun.player_direction * 50
-            Bullet(self.bullet_surf, pos, self.gun.player_direction, (self.all_sprites,self.bullet_sprites))
+            Bullet(self.bullet_surf, pos, self.gun.player_direction, (self.all_sprites, self.bullet_sprites))
             self.can_shoot = False
             self.shoot_time = pygame.time.get_ticks()
 
@@ -63,6 +96,24 @@ class Game():
                 self.player = Player((obj.x, obj.y), self.all_sprites, self.collision_sprites)
                 self.gun = Gun(self.player, self.all_sprites)
 
+            else:
+                self.spawn_position.append((obj.x, obj.y))
+
+    def bullet_collision(self):
+        if self.bullet_sprites:
+            for bullet in self.bullet_sprites:
+                collision_sprite = pygame.sprite.spritecollide(bullet, self.enemy_sprites, False,
+                                                               pygame.sprite.collide_mask)
+                if collision_sprite:
+                    self.impact_sound.play()
+                    for sprite in collision_sprite:
+                        sprite.destroy()
+                    bullet.kill()
+
+    def player_collision(self):
+        if pygame.sprite.spritecollide(self.player, self.enemy_sprites, False, pygame.sprite.collide_mask):
+            print("Taking Damage!!! ")
+
     def run(self):
         while self.running:
 
@@ -73,11 +124,17 @@ class Game():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                if event.type == self.enemy_event:
+                    Enemy(choice(self.spawn_position), choice(list(self.enemy_frames.values())),
+                          (self.all_sprites, self.enemy_sprites), self.player,
+                          self.collision_sprites)
 
             # update
             self.gun_timer()
             self.input()
             self.all_sprites.update(dt)
+            self.bullet_collision()
+            self.player_collision()
 
             # draw
             self.display_surface.fill("black")
